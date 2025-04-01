@@ -1,19 +1,22 @@
-from  embedder import embed_text
-from vectorstore import search
-from llm import generate_response
+from app.vectorstore import search
+from app.llm import generate_response
 
 def generate_answer(question: str):
-    query_vec = embed_text([question])[0]
-    relevant_chunks = search(query_vec)
+    # ChromaDB handles embedding inside `search`
+    relevant_chunks = search(question)
     context = "\n".join(relevant_chunks)
 
-    prompt = f"""[INST] Answer the question based on the context below.
-Context:
+    prompt = f"""
+You're an expert assistant. Use the context to answer the user's question as informatively as possible.
+If the answer is not found in the context, say: "I don't know".
+
+### Context:
 {context}
 
-Question:
+### Question:
 {question}
-Answer:
-[/INST]"""
 
-    return generate_response(prompt)
+### Answer:
+"""
+    answer = generate_response(prompt)
+    return answer, context

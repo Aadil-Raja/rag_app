@@ -6,3 +6,6 @@ faiss-cpu
 transformers
 torch
 ctransformers
+pypdf2
+chromadb
+openai

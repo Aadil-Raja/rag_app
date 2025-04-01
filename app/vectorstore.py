@@ -1,31 +1,19 @@
-import faiss
-import numpy as np
-import os
-import pickle
+import chromadb
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
-index = faiss.IndexFlatL2(384)
-doc_chunks = []
+client = chromadb.PersistentClient(path="chroma_db")
+embedding_fn = SentenceTransformerEmbeddingFunction(model_name="BAAI/bge-small-en")
 
-def load_index():
-    global index, doc_chunks
-    if os.path.exists("index.faiss") and os.path.exists("chunks.pkl"):
-        index = faiss.read_index("index.faiss")
-        with open("chunks.pkl", "rb") as f:
-            doc_chunks.extend(pickle.load(f))
+collection = client.get_or_create_collection(
+    name="rag_docs",
+    embedding_function=embedding_fn
+)
 
-def save_index():
-    faiss.write_index(index, "index.faiss")
-    with open("chunks.pkl", "wb") as f:
-        pickle.dump(doc_chunks, f)
+def add_to_index(chunks):
+    ids = [f"chunk-{i}" for i in range(len(chunks))]
+    collection.add(documents=chunks, ids=ids)
 
-def add_to_index(vectors, chunks):
-    index.add(np.array(vectors).astype('float32'))
-    doc_chunks.extend(chunks)
-    save_index()
-
-def search(query_vector, top_k=3):
-    if index.ntotal == 0:
-        return ["[No documents found in the index]"]
-    
-    D, I = index.search(np.array([query_vector]).astype('float32'), top_k)
-    return [doc_chunks[i] for i in I[0] if i < len(doc_chunks)]
+def search(query, top_k=3):
+    results = collection.query(query_texts=[query], n_results=top_k)
+    print("Search results:", results)
+    return results["documents"][0] if results["documents"] else ["[No results found]"]
