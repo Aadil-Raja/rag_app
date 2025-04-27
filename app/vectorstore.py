@@ -12,17 +12,23 @@ collection = client.get_or_create_collection(
     name="rag_docs",
     embedding_function=embedding_fn
 )
-def add_to_index(chunks):
+def add_to_index(chunks, metadatas):
     ids = [f"chunk-{i}" for i in range(len(chunks))]
     collection.add(
-    documents=[f"passage: {chunk}" for chunk in chunks],
-    ids=ids
-)
+        documents=chunks,
+        metadatas=metadatas,  # 👈 attach metadata here
+        ids=ids
+    )
+
 
 def search(query, top_k=3):
     query = f"query: {query}"
     results = collection.query(query_texts=[query], n_results=top_k)
-    return results["documents"][0] if results["documents"] else ["[No results found]"]
+
+    documents = results["documents"][0] if results["documents"] else []
+    metadatas = results["metadatas"][0] if results["metadatas"] else []
+
+    return list(zip(documents, metadatas))  # Return both together
 
 def clear_index():
     client.delete_collection("rag_docs")

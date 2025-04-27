@@ -10,3 +10,4 @@ pypdf2
 chromadb
 openai
 gradio
+evaluate
