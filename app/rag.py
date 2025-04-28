@@ -3,7 +3,7 @@ from app.llm import generate_response
 from sentence_transformers import CrossEncoder
 from app.rag_evaluator import simple_retrieval_score, simple_faithfulness_score
 from transformers import AutoTokenizer
-
+from app import state 
 # Load reranker
 reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
@@ -14,7 +14,7 @@ def trim_context_to_max_tokens(text: str, max_tokens: int = 512) -> str:
         tokens = tokens[:max_tokens]
     return tokenizer.decode(tokens)
 
-def rerank_chunks(question: str, chunks: list[str], top_n=5):
+def rerank_chunks(question: str, chunks: list[str], top_n=3):
     pairs = [[question, chunk] for chunk in chunks]
     scores = reranker.predict(pairs)
 
@@ -70,12 +70,25 @@ def generate_answer(question: str):
     context = "\n".join(trimmed_chunks)
     
     print(f"✂️ Trimmed Context Length (tokens): {len(tokenizer.encode(context))}\n")
-
+    instructions=""
     # Step 5: Build prompt
-    prompt = f"""
-You're an expert assistant. Use the context to answer the user's question as informatively as possible.
-If the answer is not found in the context, say: "I don't know".
+    if state.current_pdf_type == "Resume/CV":
+        instructions = """You are an expert resume assistant. 
+Use the provided resume information only.
 
+The context is organized into sections like [Education], [Skills], [Projects], etc.
+
+Answer the user's question accurately based on this context.
+If the information is not available, say: "Information not available."
+"""
+    else:
+        instructions = """You are an expert assistant. 
+Use the given document context to answer the user's question as informatively as possible.
+If the answer is not found, say: "I don't know."
+"""
+    print(instructions)
+    prompt = f"""
+{instructions}
 ### Context:
 {context}
 

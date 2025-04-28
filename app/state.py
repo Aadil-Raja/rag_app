@@ -1,0 +1,1 @@
+current_pdf_type = "Auto Detect"

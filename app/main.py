@@ -6,6 +6,7 @@ from gradio.routes import mount_gradio_app
 from app.embed_pdf import embed_uploaded_pdfs
 import tempfile
 import shutil
+from app import state
 import os
 from app.vectorstore import clear_index
 
@@ -17,7 +18,7 @@ async def ask_question(query: Query):
     result = generate_answer(query.question)
     return result
 
-# ✅ Gradio RAG Chat
+# ✅ RAG Chat
 def rag_chat(query):
     result = generate_answer(query)
 
@@ -29,10 +30,9 @@ def rag_chat(query):
     retrieval_score = result.get("retrieval_score", 0)
     faithfulness_score = result.get("faithfulness_score", 0)
 
-    # Build Answer Display
+    # Build Display
     answer_box = f"🤖 Final Answer:\n\n{answer}"
 
-    # Build Top Chunks + Scores + Sources
     top_chunks_text = ""
     for idx, (chunk, score, source) in enumerate(zip(top_chunks, top_scores, sources), start=1):
         source_info = ""
@@ -41,10 +41,8 @@ def rag_chat(query):
         
         top_chunks_text += f"Top {idx} (Score: {score:.4f})\n{chunk}\n(Source: {source_info})\n\n"
 
-    # Build Context
     context_text = f"🧠 Final Context Sent to LLM:\n\n{context}"
 
-    # Build Evaluation Metrics
     eval_text = (
         f"📈 Retrieval Score: {retrieval_score * 100:.2f}%\n"
         f"📈 Faithfulness Score: {faithfulness_score * 100:.2f}%"
@@ -52,7 +50,9 @@ def rag_chat(query):
 
     return answer_box, top_chunks_text, context_text, eval_text
 
-def handle_upload(files, pdf_type):
+# ✅ Upload
+def handle_upload(files, pdf_type, qa_chunk_size):
+    state.current_pdf_type = pdf_type
     clear_index()
     temp_dir = tempfile.mkdtemp()
 
@@ -60,41 +60,59 @@ def handle_upload(files, pdf_type):
         file_name = os.path.basename(file.name)
         shutil.copy(file.name, os.path.join(temp_dir, file_name))
 
-    chunks_count = embed_uploaded_pdfs(temp_dir, pdf_type)
+    chunks_count = embed_uploaded_pdfs(temp_dir, pdf_type=pdf_type, qa_chunk_size=int(qa_chunk_size))
     shutil.rmtree(temp_dir)
     return f"✅ Indexed {chunks_count} chunks from {len(files)} uploaded PDF(s) with '{pdf_type}' style."
-upload_interface = gr.Interface(
-    fn=handle_upload,
-    inputs=[
-        gr.File(file_types=[".pdf"], label="Upload PDF(s)", file_count="multiple"),
-        gr.Dropdown(
-            choices=["Auto Detect", "Q/A Style PDF", "Normal Paragraph PDF"],
+
+# ✅ Build Upload and Chat Interfaces inside Blocks
+with gr.Blocks() as demo:
+    
+    with gr.Tab("📁 Upload PDFs"):
+        pdf_upload = gr.File(file_types=[".pdf"], label="Upload PDF(s)", file_count="multiple")
+        pdf_type_dropdown = gr.Dropdown(
+            choices=["Auto Detect", "Q/A Style PDF", "Normal Paragraph PDF","Resume/CV"],
             value="Auto Detect",
             label="Select PDF Type"
         )
-    ],
-    outputs="text",
-    title="📁 Upload PDFs for RAG",
-    description="Upload PDFs and specify their structure for best results."
-)
+        qa_chunk_size_slider = gr.Slider(
+            minimum=1, maximum=10, step=1, value=2,
+            label="Questions per Chunk",
+            visible=False
+        )
+        upload_button = gr.Button("Upload and Embed")
 
-chat_interface = gr.Interface(
-    fn=rag_chat,
-    inputs=gr.Textbox(label="Enter your question", placeholder="Ask about uploaded PDFs..."),
-    outputs=[
-        gr.Textbox(label="🤖 Final Answer"),
-        gr.Textbox(label="📚 Top Retrieved Chunks (with Sources)"),
-        gr.Textbox(label="🧠 Full Context Sent to LLM"),
-        gr.Textbox(label="📈 Evaluation Metrics"),
-    ],
-    title="💬 Ask Questions to RAG",
-    description="Ask anything and see retrieved chunks, sources, and evaluation scores."
-)
+        output_text = gr.Textbox(label="Upload Output")
 
-# ✅ Mount Gradio App
-demo = gr.TabbedInterface(
-    [upload_interface, chat_interface],
-    ["📁 Upload PDFs", "💬 Ask Questions"]
-)
+        # 🔥 Dynamic visibility trigger
+        def update_chunk_visibility(pdf_type):
+            return gr.update(visible=(pdf_type == "Q/A Style PDF"))
 
+        pdf_type_dropdown.change(
+            update_chunk_visibility,
+            inputs=[pdf_type_dropdown],
+            outputs=[qa_chunk_size_slider]
+        )
+
+        upload_button.click(
+            handle_upload,
+            inputs=[pdf_upload, pdf_type_dropdown, qa_chunk_size_slider],
+            outputs=[output_text]
+        )
+
+    with gr.Tab("💬 Ask Questions"):
+        chat_input = gr.Textbox(label="Enter your question", placeholder="Ask about uploaded PDFs...")
+        answer_box = gr.Textbox(label="🤖 Final Answer")
+        top_chunks_box = gr.Textbox(label="📚 Top Retrieved Chunks (with Sources)")
+        context_box = gr.Textbox(label="🧠 Full Context Sent to LLM")
+        eval_box = gr.Textbox(label="📈 Evaluation Metrics")
+
+        ask_button = gr.Button("Ask")
+
+        ask_button.click(
+            rag_chat,
+            inputs=[chat_input],
+            outputs=[answer_box, top_chunks_box, context_box, eval_box]
+        )
+
+# ✅ Mount on FastAPI
 app = mount_gradio_app(app, demo, path="/gradio")
