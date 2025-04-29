@@ -81,6 +81,16 @@ The context is organized into sections like [Education], [Skills], [Projects], e
 Answer the user's question accurately based on this context.
 If the information is not available, say: "Information not available."
 """
+    elif state.current_pdf_type == "Q/A Style PDF":
+       instructions = """You are an expert assistant answering based on a document that contains many question-answer pairs (Q:... A:... format).
+
+1. If the user's query resembles or matches any question in the context, respond with the corresponding answer(s).
+2. If the query is general or exploratory (e.g., "What kind of information is present in the document?"), summarize or list relevant Q/A pairs.
+3. If no relevant information is found, say: "I don't know."
+
+Use only the provided context. Do not guess or hallucinate outside it.
+"""
+
     else:
         instructions = """You are an expert assistant. 
 Use the given document context to answer the user's question as informatively as possible.

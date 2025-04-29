@@ -6,20 +6,19 @@ from app.vectorstore import add_to_index
 def is_qa_style(text: str) -> bool:
     """Auto detect if PDF looks like a Q/A style based on number of Q: and A: patterns."""
     return text.count('Q:') > 5 and text.count('A:') > 5
-def chunk_qa_style(text: str,qa_chunk_size=1) -> list:
+
+def chunk_qa_style(text: str, qa_chunk_size=1) -> list:
     """Split text into Q/A chunks correctly even if line breaks exist."""
-    # New smarter pattern
     pattern = r"(Q\d*:.*?A:.*?)(?=(?:Q\d*:)|$)"
     matches = re.findall(pattern, text, flags=re.DOTALL)
 
     chunks = []
     for i in range(0, len(matches), qa_chunk_size):
-        group = matches[i:i+qa_chunk_size]
+        group = matches[i:i + qa_chunk_size]
         cleaned = " ".join(q.strip().replace("\n", " ") for q in group)
         if cleaned:
             chunks.append(cleaned)
     return chunks
-
 
 def chunk_paragraph_style(text: str, chunk_size: int = 300, overlap: int = 50) -> list:
     """Split normal text into paragraph chunks with overlap."""
@@ -31,8 +30,7 @@ def chunk_paragraph_style(text: str, chunk_size: int = 300, overlap: int = 50) -
         start += chunk_size - overlap
     return chunks
 
-def chunk_resume_sections(text: str) -> list :
-    
+def chunk_resume_sections(text: str) -> list:
     pattern = r"(Education|Skills|Experience|Projects|Certifications|Awards|Languages)"
     matches = list(re.finditer(pattern, text, flags=re.IGNORECASE))
 
@@ -40,13 +38,27 @@ def chunk_resume_sections(text: str) -> list :
     for idx in range(len(matches)):
         start = matches[idx].start()
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
-
         section_text = text[start:end].strip()
         if section_text:
             chunks.append(section_text)
     return chunks
 
-def embed_uploaded_pdfs(upload_dir: str, pdf_type: str = "Auto Detect",qa_chunk_size=1) -> int:
+def chunk_slides(reader, slides_per_chunk=1) -> list:
+    """Chunk based on actual slide pages from PyPDF2 reader."""
+    page_texts = []
+    for page in reader.pages:
+        text = page.extract_text()
+        if text:
+            page_texts.append(text.strip().replace("\n", " "))
+
+    chunks = []
+    for i in range(0, len(page_texts), slides_per_chunk):
+        chunk = " ".join(page_texts[i:i + slides_per_chunk])
+        chunks.append(chunk.strip())
+    return chunks
+
+
+def embed_uploaded_pdfs(upload_dir: str, pdf_type: str = "Auto Detect", qa_chunk_size=1, slide_chunk_size=1) -> int:
     """Embed PDFs inside a folder by either Q/A splitting or paragraph splitting."""
     all_chunks = []
     all_metadatas = []
@@ -62,7 +74,6 @@ def embed_uploaded_pdfs(upload_dir: str, pdf_type: str = "Auto Detect",qa_chunk_
                 if text:
                     full_text += text + "\n"
 
-
             # ✨ Decide splitting method
             if pdf_type == "Auto Detect":
                 if is_qa_style(full_text):
@@ -70,9 +81,11 @@ def embed_uploaded_pdfs(upload_dir: str, pdf_type: str = "Auto Detect",qa_chunk_
                 else:
                     chunks = chunk_paragraph_style(full_text)
             elif pdf_type == "Q/A Style PDF":
-                chunks = chunk_qa_style(full_text,qa_chunk_size)
+                chunks = chunk_qa_style(full_text, qa_chunk_size)
             elif pdf_type == "Resume/CV":
-                chunks= chunk_resume_sections(full_text)
+                chunks = chunk_resume_sections(full_text)
+            elif pdf_type == "PDF Slides":
+                chunks = chunk_slides(reader, slide_chunk_size)
             else:  # "Normal Paragraph PDF"
                 chunks = chunk_paragraph_style(full_text)
 
@@ -84,10 +97,9 @@ def embed_uploaded_pdfs(upload_dir: str, pdf_type: str = "Auto Detect",qa_chunk_
                 all_chunks.append(chunk)
                 all_metadatas.append({
                     "filename": file,
-                    "page_number": 1  # Full document considered page 1
+                    "page_number": 1
                 })
 
-    # ✅ Now properly pass both chunks and metadata
     add_to_index(all_chunks, all_metadatas)
     print(f"✅ Indexed {len(all_chunks)} chunks with metadata!")
     return len(all_chunks)
