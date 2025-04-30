@@ -4,24 +4,29 @@ import PyPDF2
 from app.vectorstore import add_to_index
 
 def is_qa_style(text: str) -> bool:
-    """Auto detect if PDF looks like a Q/A style based on number of Q: and A: patterns."""
     return text.count('Q:') > 5 and text.count('A:') > 5
 
 def chunk_qa_style(text: str, qa_chunk_size=1) -> list:
-    """Split text into Q/A chunks correctly even if line breaks exist."""
     pattern = r"(Q\d*:.*?A:.*?)(?=(?:Q\d*:)|$)"
     matches = re.findall(pattern, text, flags=re.DOTALL)
 
     chunks = []
+    metadata = []
     for i in range(0, len(matches), qa_chunk_size):
         group = matches[i:i + qa_chunk_size]
         cleaned = " ".join(q.strip().replace("\n", " ") for q in group)
         if cleaned:
             chunks.append(cleaned)
-    return chunks
+            if qa_chunk_size == 1:
+                label = f"question: Q{str(i + 1)}"
+            else:
+                q_start = i + 1
+                q_end = min(i + qa_chunk_size, len(matches))
+                label = f"questions: Q{q_start}-Q{q_end}"
+            metadata.append(label)
+    return list(zip(chunks, metadata))
 
 def chunk_paragraph_style(text: str, chunk_size: int = 300, overlap: int = 50) -> list:
-    """Split normal text into paragraph chunks with overlap."""
     chunks = []
     start = 0
     while start < len(text):
@@ -31,35 +36,63 @@ def chunk_paragraph_style(text: str, chunk_size: int = 300, overlap: int = 50) -
     return chunks
 
 def chunk_resume_sections(text: str) -> list:
+    import re
+
+    # Regex pattern to detect sections
     pattern = r"(Education|Skills|Experience|Projects|Certifications|Awards|Languages)"
     matches = list(re.finditer(pattern, text, flags=re.IGNORECASE))
 
+    # Extract name from the top of the resume
+    name_block = text[:matches[0].start()].strip() if matches else text.strip()
+    name = name_block.splitlines()[0].strip() if name_block else "Unknown"
+
     chunks = []
+    metadata = []
+
+    # Add header section
+    if name_block:
+        header_details = f"name: {name}\nsection type: Header\ndetails: {name_block}"
+        chunks.append(header_details)
+        metadata.append("section: Header")
+
+    # Add each labeled section with name and type
     for idx in range(len(matches)):
         start = matches[idx].start()
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
         section_text = text[start:end].strip()
         if section_text:
-            chunks.append(section_text)
-    return chunks
+            section_name = matches[idx].group(0).capitalize()
+            labeled_chunk = f"name: {name}\nsection type: {section_name}\ndetails: {section_text}"
+            chunks.append(labeled_chunk)
+            metadata.append(f"section: {section_name}")
+
+    return list(zip(chunks, metadata))
 
 def chunk_slides(reader, slides_per_chunk=1) -> list:
-    """Chunk based on actual slide pages from PyPDF2 reader."""
     page_texts = []
-    for page in reader.pages:
+    page_indices = []
+    for i, page in enumerate(reader.pages):
         text = page.extract_text()
         if text:
             page_texts.append(text.strip().replace("\n", " "))
+            page_indices.append(i + 1)
 
     chunks = []
+    metadata = []
     for i in range(0, len(page_texts), slides_per_chunk):
         chunk = " ".join(page_texts[i:i + slides_per_chunk])
+        start_pg = page_indices[i]
+        end_pg = page_indices[min(i + slides_per_chunk - 1, len(page_indices) - 1)]
+        if start_pg == end_pg:
+            label = f"page: {start_pg}"
+        else:
+            label = f"pages: {start_pg}-{end_pg}"
         chunks.append(chunk.strip())
-    return chunks
+        metadata.append(label)
 
+    return list(zip(chunks, metadata))
 
 def embed_uploaded_pdfs(upload_dir: str, pdf_type: str = "Auto Detect", qa_chunk_size=1, slide_chunk_size=1) -> int:
-    """Embed PDFs inside a folder by either Q/A splitting or paragraph splitting."""
     all_chunks = []
     all_metadatas = []
 
@@ -69,35 +102,34 @@ def embed_uploaded_pdfs(upload_dir: str, pdf_type: str = "Auto Detect", qa_chunk
             reader = PyPDF2.PdfReader(pdf_path)
 
             full_text = ""
-            for page_num, page in enumerate(reader.pages):
+            for page in reader.pages:
                 text = page.extract_text()
                 if text:
                     full_text += text + "\n"
 
-            # ✨ Decide splitting method
-            if pdf_type == "Auto Detect":
-                if is_qa_style(full_text):
-                    chunks = chunk_qa_style(full_text)
-                else:
-                    chunks = chunk_paragraph_style(full_text)
-            elif pdf_type == "Q/A Style PDF":
-                chunks = chunk_qa_style(full_text, qa_chunk_size)
+          
+            if pdf_type == "Q/A Style PDF":
+                qa_chunks = chunk_qa_style(full_text, qa_chunk_size)
+                chunks, metadata = zip(*qa_chunks)
             elif pdf_type == "Resume/CV":
-                chunks = chunk_resume_sections(full_text)
+                resume_chunks = chunk_resume_sections(full_text)
+                chunks, metadata = zip(*resume_chunks)
             elif pdf_type == "PDF Slides":
-                chunks = chunk_slides(reader, slide_chunk_size)
-            else:  # "Normal Paragraph PDF"
+                slide_chunks = chunk_slides(reader, slide_chunk_size)
+                chunks, metadata = zip(*slide_chunks)
+            else:
                 chunks = chunk_paragraph_style(full_text)
+                metadata = ["page: 1"] * len(chunks)
 
             for idx, chunk in enumerate(chunks, start=1):
                 print(f"Chunk {idx}: {chunk}\n")
             print(f"📄 {file} ➔ {len(chunks)} chunks generated.")
 
-            for chunk in chunks:
+            for chunk, label in zip(chunks, metadata):
                 all_chunks.append(chunk)
                 all_metadatas.append({
                     "filename": file,
-                    "page_number": 1
+                    "label": label
                 })
 
     add_to_index(all_chunks, all_metadatas)

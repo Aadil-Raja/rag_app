@@ -47,8 +47,9 @@ def rag_chat(query):
 
     return answer_box, top_chunks_text, context_text, eval_text
 
-def handle_upload(files, pdf_type, qa_chunk_size, slide_chunk_size):
+def handle_upload(files, pdf_type, qa_chunk_size, slide_chunk_size,topK_size_slider):
     state.current_pdf_type = pdf_type
+    state.current_topK_size_slider=int(topK_size_slider)
     clear_index()
     temp_dir = tempfile.mkdtemp()
 
@@ -69,8 +70,8 @@ with gr.Blocks() as demo:
     with gr.Tab("📁 Upload PDFs"):
         pdf_upload = gr.File(file_types=[".pdf"], label="Upload PDF(s)", file_count="multiple")
         pdf_type_dropdown = gr.Dropdown(
-            choices=["Auto Detect", "Q/A Style PDF", "Normal Paragraph PDF", "Resume/CV", "PDF Slides"],
-            value="Auto Detect",
+            choices=[ "Q/A Style PDF", "Others", "Resume/CV", "PDF Slides"],
+            value="Q/A Style PDF",
             label="Select PDF Type"
         )
         qa_chunk_size_slider = gr.Slider(
@@ -82,6 +83,11 @@ with gr.Blocks() as demo:
             minimum=1, maximum=4, step=1, value=1,
             label="Slides per Chunk",
             visible=False
+        )
+        topK_size_slider = gr.Slider(
+            minimum=1, maximum=4, step=1, value=1,
+            label="Top-K Context",
+           
         )
         upload_button = gr.Button("Upload and Embed")
         output_text = gr.Textbox(label="Upload Output")
@@ -100,7 +106,7 @@ with gr.Blocks() as demo:
 
         upload_button.click(
             handle_upload,
-            inputs=[pdf_upload, pdf_type_dropdown, qa_chunk_size_slider, slide_chunk_size_slider],
+            inputs=[pdf_upload, pdf_type_dropdown, qa_chunk_size_slider, slide_chunk_size_slider,topK_size_slider],
             outputs=[output_text]
         )
 
